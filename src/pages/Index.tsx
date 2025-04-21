@@ -1,6 +1,4 @@
 
-// Main landing and functionality
-
 import React, { useState } from "react";
 import ImageUploader, { ImageFile } from "@/components/ImageUploader";
 import ImageGroup from "@/components/ImageGroup";
@@ -23,7 +21,7 @@ const Index = () => {
     <div className="min-h-screen flex flex-col bg-gradient-to-tr from-[#D6BCFA] via-[#D3E4FD] to-[#F1F0FB]">
       <header className="pt-10 pb-6 text-center">
         <h1 className="text-4xl sm:text-5xl font-extrabold text-violet-900 mb-3 tracking-tight drop-shadow">
-          Image Duo Sorter
+          Parjinya Beta
         </h1>
         <p className="text-lg text-gray-700 max-w-lg mx-auto">
           Upload your images and let us segregate them into two groups with the press of a button!
@@ -54,10 +52,11 @@ const Index = () => {
       </main>
 
       <footer className="w-full text-center my-8 text-sm text-gray-500">
-        &copy; {new Date().getFullYear()} Image Duo Sorter &mdash; by Lovable
+        &copy; {new Date().getFullYear()} Parjinya Beta &mdash; by Lovable
       </footer>
     </div>
   );
 };
 
 export default Index;
+
