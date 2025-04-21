@@ -6,13 +6,16 @@ import { Upload, Images } from "lucide-react";
 type ImageFile = {
   file: File;
   url: string;
+  s3Url?: string; // store S3 url after upload
 };
 
 type Props = {
   onSegregate: (groups: [ImageFile[], ImageFile[]]) => void;
 };
 
-const LAMBDA_ENDPOINT = "https://your-lambda-api-endpoint.amazonaws.com/dev/segregate"; // TODO: replace with your Lambda endpoint
+// Set your Lambda endpoints here
+const LAMBDA_GET_SIGNED_URL = "https://your-lambda-api-endpoint.amazonaws.com/dev/get-s3-presigned-url"; // Returns { url, s3Url }
+const LAMBDA_ENDPOINT = "https://your-lambda-api-endpoint.amazonaws.com/dev/segregate"; // Expects S3 URLs
 
 const ImageUploader: React.FC<Props> = ({ onSegregate }) => {
   const [images, setImages] = useState<ImageFile[]>([]);
@@ -45,20 +48,54 @@ const ImageUploader: React.FC<Props> = ({ onSegregate }) => {
     inputRef.current?.click();
   }
 
+  // Returns an object { url (presigned PUT), s3Url (final public url) }
+  async function getPresignedUrl(fileName: string, contentType: string) {
+    const res = await fetch(LAMBDA_GET_SIGNED_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileName, contentType }),
+    });
+    if (!res.ok) throw new Error("Failed to get presigned S3 url");
+    return res.json();
+  }
+
+  // Uploads given file using fetched presigned url
+  async function uploadFileToS3(file: File): Promise<string> {
+    const { url, s3Url } = await getPresignedUrl(file.name, file.type);
+    const uploadRes = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": file.type },
+      body: file,
+    });
+    if (!uploadRes.ok) throw new Error(`Failed to upload ${file.name} to S3`);
+    return s3Url;
+  }
+
   async function segregate() {
     if (images.length === 0) return;
 
     setLoading(true);
 
     try {
-      const formData = new FormData();
-      images.forEach((img, idx) => {
-        formData.append("images", img.file, img.file.name);
+      // 1. Upload all images to S3 and gather their URLs
+      const s3UploadPromises = images.map(async (image, idx) => {
+        const s3Url = await uploadFileToS3(image.file);
+        return { ...image, s3Url };
       });
+      const imagesWithUrls = await Promise.all(s3UploadPromises);
+
+      // 2. Call segregation lambda with S3 URLs only
+      const body = {
+        images: imagesWithUrls.map(i => ({
+          name: i.file.name,
+          s3Url: i.s3Url,
+        })),
+      };
 
       const response = await fetch(LAMBDA_ENDPOINT, {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       });
 
       if (!response.ok) {
@@ -76,18 +113,17 @@ const ImageUploader: React.FC<Props> = ({ onSegregate }) => {
         throw new Error("Unexpected Lambda response");
       }
 
-      // Map group filenames to ImageFile objects
-      const group1 = images.filter(img =>
+      // Map group filenames to ImageFile objects with s3Urls
+      const group1 = imagesWithUrls.filter(img =>
         data.groups[0].includes(img.file.name)
       );
-      const group2 = images.filter(img =>
+      const group2 = imagesWithUrls.filter(img =>
         data.groups[1].includes(img.file.name)
       );
       onSegregate([group1, group2]);
     } catch (err) {
-      // Fallback: locally random split if Lambda fails
-      console.error("Lambda call failed, using fallback:", err);
-      // Placeholder: Randomly assign to groups
+      // Fallback: locally random split if Lambda or upload fails
+      console.error("S3/Lambda call failed, using fallback:", err);
       const shuffled = [...images].sort(() => 0.5 - Math.random());
       const mid = Math.ceil(shuffled.length / 2);
       const group1 = shuffled.slice(0, mid);
@@ -102,8 +138,8 @@ const ImageUploader: React.FC<Props> = ({ onSegregate }) => {
     <div>
       <div
         className={
-          "flex flex-col items-center justify-center border-2 border-dashed rounded-lg transition-colors duration-200 p-6 cursor-pointer "
-          + (dragActive ? "bg-blue-100 border-blue-400" : "bg-gray-50 border-gray-300")
+          "flex flex-col items-center justify-center border-2 border-dashed rounded-lg transition-colors duration-200 p-6 cursor-pointer " +
+          (dragActive ? "bg-blue-100 border-blue-400" : "bg-gray-50 border-gray-300")
         }
         tabIndex={0}
         onClick={triggerInput}
